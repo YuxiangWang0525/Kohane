@@ -1,11 +1,15 @@
 AC_PREREQ([2.69])
 AC_INIT([kohane], [1.0.0], [https://github.com/YuxiangWang0525/Kohane/issues])
 AC_CONFIG_SRCDIR([main.c])
+AC_CONFIG_MACRO_DIRS([m4])
 AM_INIT_AUTOMAKE([foreign -Wall -Werror])
 
 # Checks for programs
 AC_PROG_CC
 AC_PROG_INSTALL
+
+# Ensure pkg-config is available
+PKG_PROG_PKG_CONFIG
 
 # Checks for header files
 AC_CHECK_HEADERS([sys/stat.h sys/types.h errno.h])

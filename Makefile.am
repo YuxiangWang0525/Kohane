@@ -1,3 +1,5 @@
+ACLOCAL_AMFLAGS = -I m4
+
 bin_PROGRAMS = kohane
 
 kohane_SOURCES = main.c

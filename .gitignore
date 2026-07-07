@@ -20,3 +20,4 @@ missing
 stamp-h1
 .deps/
 Makefile
+m4/pkg.m4
