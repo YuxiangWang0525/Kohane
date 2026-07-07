@@ -10,25 +10,36 @@ if(MSVC)
     target_compile_options(Kohane PRIVATE /utf-8)
 endif()
 
-# ── 依赖查找: 优先 Conan, 回退到 pkg-config (系统包/vcpkg) ──
-find_package(ffmpeg QUIET)
-find_package(PNG QUIET)
+# 自定义 FindModule 路径
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
-if(ffmpeg_FOUND AND PNG_FOUND)
-    # Conan 模式
-    set(FFMPEG_LIBS ffmpeg::ffmpeg)
-    set(PNG_LIBS PNG::PNG)
-else()
-    # 系统包 / vcpkg 模式 (pkg-config)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
-        libavformat libavcodec libavutil libswscale)
-    pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)
-    set(FFMPEG_LIBS PkgConfig::FFMPEG)
-    set(PNG_LIBS PkgConfig::PNG)
+# ── 依赖查找: 优先 Conan, 回退到 FindModule / find_library ──
+find_package(ffmpeg QUIET)   # Conan
+find_package(PNG QUIET)      # Conan / 系统
+
+if(NOT ffmpeg_FOUND OR NOT PNG_FOUND)
+    # FFmpeg: 使用自定义 FindFFmpeg (find_library, 无需 pkg-config)
+    if(NOT TARGET ffmpeg::ffmpeg)
+        find_package(FFmpeg REQUIRED)
+    endif()
+
+    # PNG: find_library 回退 (vcpkg / 系统包)
+    if(NOT TARGET PNG::PNG)
+        find_library(PNG_LIBRARY NAMES png png16 libpng16)
+        find_path(PNG_INCLUDE_DIR NAMES png.h PATH_SUFFIXES libpng16)
+        if(PNG_LIBRARY AND PNG_INCLUDE_DIR)
+            add_library(PNG::PNG UNKNOWN IMPORTED)
+            set_target_properties(PNG::PNG PROPERTIES
+                IMPORTED_LOCATION "${PNG_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${PNG_INCLUDE_DIR}"
+            )
+        else()
+            message(FATAL_ERROR "Could not find PNG library")
+        endif()
+    endif()
 endif()
 
 target_link_libraries(Kohane PRIVATE
-    ${FFMPEG_LIBS}
-    ${PNG_LIBS}
+    ffmpeg::ffmpeg
+    PNG::PNG
 )
