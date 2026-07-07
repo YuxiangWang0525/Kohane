@@ -18,10 +18,9 @@ if(ffmpeg_FOUND)
     set(FFMPEG_LIBS ffmpeg::ffmpeg)
 else()
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(FFMPEG REQUIRED
+    pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
         libavformat libavcodec libavutil libswscale)
-    target_include_directories(Kohane PRIVATE ${FFMPEG_INCLUDE_DIRS})
-    target_link_directories(Kohane PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    set(FFMPEG_LIBS PkgConfig::FFMPEG)
 endif()
 
 target_link_libraries(Kohane PRIVATE
