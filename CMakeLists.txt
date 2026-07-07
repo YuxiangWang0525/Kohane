@@ -10,20 +10,20 @@ if(MSVC)
     target_compile_options(Kohane PRIVATE /utf-8)
 endif()
 
-# 自定义 FindModule 路径
+# Custom FindModule path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
-# ── 依赖查找: 优先 Conan, 回退到 FindModule / find_library ──
+# ── Dependency resolution: Conan first, fallback to FindModule / find_library ──
 find_package(ffmpeg QUIET)   # Conan
-find_package(PNG QUIET)      # Conan / 系统
+find_package(PNG QUIET)      # Conan / system
 
 if(NOT ffmpeg_FOUND OR NOT PNG_FOUND)
-    # FFmpeg: 使用自定义 FindFFmpeg (find_library, 无需 pkg-config)
+    # FFmpeg: custom FindFFmpeg (find_library, no pkg-config needed)
     if(NOT TARGET ffmpeg::ffmpeg)
         find_package(FFmpeg REQUIRED)
     endif()
 
-    # PNG: find_library 回退 (vcpkg / 系统包)
+    # PNG: find_library fallback (vcpkg / system packages)
     if(NOT TARGET PNG::PNG)
         find_library(PNG_LIBRARY NAMES png png16 libpng16)
         find_path(PNG_INCLUDE_DIR NAMES png.h PATH_SUFFIXES libpng16)
@@ -43,3 +43,8 @@ target_link_libraries(Kohane PRIVATE
     ffmpeg::ffmpeg
     PNG::PNG
 )
+
+# Windows system libs required by FFmpeg (networking, TLS, crypto)
+if(WIN32)
+    target_link_libraries(Kohane PRIVATE ws2_32 secur32 crypt32 ncrypt)
+endif()

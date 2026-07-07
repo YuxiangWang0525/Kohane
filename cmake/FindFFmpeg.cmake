@@ -1,19 +1,19 @@
-# FindFFmpeg.cmake - 查找 FFmpeg 组件 (系统包 / vcpkg / Homebrew)
+# FindFFmpeg.cmake - Find FFmpeg components (system packages / vcpkg / Homebrew)
 #
-# 创建导入目标: ffmpeg::ffmpeg
-# 设置: FFmpeg_FOUND
+# Creates imported target: ffmpeg::ffmpeg
+# Sets: FFmpeg_FOUND
 
-# 查找头文件
+# Find header files
 find_path(FFMPEG_INCLUDE_DIR libavformat/avformat.h)
 
-# 查找各组件库
+# Find component libraries
 find_library(AVFORMAT_LIBRARY NAMES avformat)
 find_library(AVCODEC_LIBRARY   NAMES avcodec)
 find_library(AVUTIL_LIBRARY    NAMES avutil)
 find_library(SWSCALE_LIBRARY   NAMES swscale)
 find_library(SWRESAMPLE_LIBRARY NAMES swresample)
 
-# 收集所有库
+# Collect all libraries
 set(FFMPEG_LIBRARIES
     ${AVFORMAT_LIBRARY}
     ${AVCODEC_LIBRARY}
@@ -22,7 +22,7 @@ set(FFMPEG_LIBRARIES
     ${SWRESAMPLE_LIBRARY}
 )
 
-# Windows 静态链接需要额外的系统库和第三方依赖
+# Windows static linking requires extra system libs and third-party dependencies
 if(WIN32)
     set(_ffmpeg_extra_libs "")
     foreach(_lib bcrypt secur32 ws2_32 iconv m vfw32 user32 gdi32
@@ -41,7 +41,7 @@ if(WIN32)
     list(APPEND FFMPEG_LIBRARIES ${_ffmpeg_extra_libs})
 endif()
 
-# 创建导入目标
+# Create imported target
 if(FFMPEG_INCLUDE_DIR AND FFMPEG_LIBRARIES)
     if(NOT TARGET ffmpeg::ffmpeg)
         add_library(ffmpeg::ffmpeg INTERFACE IMPORTED)

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
@@ -20,10 +21,95 @@
 #include <libswscale/swscale.h>
 #include <png.h>
 
-/* 抑制 FFmpeg 解码错误刷屏 (seek 后部分损坏包属正常现象) */
+/* ──────────────────── i18n ──────────────────── */
+
+static int g_lang = 0; /* 0 = English, 1 = Chinese */
+
+enum {
+    S_TITLE, S_USAGE, S_OPTIONS, S_OPT_I, S_OPT_S, S_OPT_S2,
+    S_EXAMPLES, S_ERR_INTERVAL, S_ERR_UNKNOWN, S_ERR_NO_INPUT,
+    S_OUT_DIR, S_ERR_MKDIR, S_ERR_OPEN_VIDEO, S_ERR_STREAM_INFO,
+    S_ERR_NO_VIDEO, S_ERR_CODEC, S_ERR_DECODER,
+    S_VIDEO_INFO, S_CAPTURING, S_DONE, S_ERR_INTERVAL_FMT,
+    S_EX1, S_EX2, S_EX3, S_FRAME_FMT,
+    S_COUNT
+};
+
+static const char *S_en[S_COUNT] = {
+    /* S_TITLE       */ "Kohane - Video Frame Extractor\n\n",
+    /* S_USAGE       */ "Usage: Kohane -i <video> [-s <interval>]\n\n",
+    /* S_OPTIONS     */ "Options:\n",
+    /* S_OPT_I       */ "  -i <file>     Input video file path\n",
+    /* S_OPT_S       */ "  -s <interval> Capture interval (default: 30s)\n",
+    /* S_OPT_S2      */ "                Supports: 30s, 2m, 1h, 500ms, 1d, etc.\n",
+    /* S_EXAMPLES    */ "\nExamples:\n",
+    /* S_ERR_INTERVAL*/ "Error: invalid interval format\n",
+    /* S_ERR_UNKNOWN */ "Unknown argument\n",
+    /* S_ERR_NO_INPUT*/ "Error: please specify input file with -i\n",
+    /* S_OUT_DIR     */ "Output directory: %s\n",
+    /* S_ERR_MKDIR   */ "Error: cannot create directory '%s'\n",
+    /* S_ERR_OPEN_VID*/ "Error: cannot open video '%s'\n",
+    /* S_ERR_STREAM  */ "Error: cannot retrieve stream info\n",
+    /* S_ERR_NO_VIDEO*/ "Error: no video stream found\n",
+    /* S_ERR_CODEC   */ "Error: unsupported codec\n",
+    /* S_ERR_DECODER */ "Error: cannot open decoder\n",
+    /* S_VIDEO_INFO  */ "Video: %dx%d, interval: %.2f sec\n",
+    /* S_CAPTURING   */ "Capturing...\n",
+    /* S_DONE        */ "\nDone! %d frame(s) captured -> %s\n",
+    /* S_ERR_INT_FMT */ "Error: invalid interval format '%s'\n",
+    /* S_EX1         */ "  Kohane -i video.mp4\n",
+    /* S_EX2         */ "  Kohane -i video.mp4 -s 1m\n",
+    /* S_EX3         */ "  Kohane -i video.mp4 -s 500ms\n",
+    /* S_FRAME_FMT   */ "  [%04d] %s  (%.2fs)\n",
+};
+
+static const char *S_zh[S_COUNT] = {
+    /* S_TITLE       */ "Kohane - \xe8\xa7\x86\xe9\xa2\x91\xe5\xb8\xa7\xe6\x88\xaa\xe5\x8f\x96\xe5\xb7\xa5\xe5\x85\xb7\n\n",
+    /* S_USAGE       */ "\xe7\x94\xa8\xe6\xb3\x95: Kohane -i <\xe8\xa7\x86\xe9\xa2\x91\xe6\x96\x87\xe4\xbb\xb6> [-s <\xe9\x97\xb4\xe9\x9a\x94>]\n\n",
+    /* S_OPTIONS     */ "\xe9\x80\x89\xe9\xa1\xb9:\n",
+    /* S_OPT_I       */ "  -i <\xe6\x96\x87\xe4\xbb\xb6>   \xe8\xbe\x93\xe5\x85\xa5\xe8\xa7\x86\xe9\xa2\x91\xe6\x96\x87\xe4\xbb\xb6\xe8\xb7\xaf\xe5\xbe\x84\n",
+    /* S_OPT_S       */ "  -s <\xe9\x97\xb4\xe9\x9a\x94>   \xe6\x88\xaa\xe5\x9b\xbe\xe9\x97\xb4\xe9\x9a\x94 (\xe9\xbb\x98\xe8\xae\xa4: 30s)\n",
+    /* S_OPT_S2      */ "              \xe6\x94\xaf\xe6\x8c\x81: 30s, 2m, 1h, 500ms, 1d \xe7\xad\x89\n",
+    /* S_EXAMPLES    */ "\n\xe7\xa4\xba\xe4\xbe\x8b:\n",
+    /* S_ERR_INTERVAL*/ "\xe9\x94\x99\xe8\xaf\xaf: \xe6\x97\xa0\xe6\x95\x88\xe7\x9a\x84\xe9\x97\xb4\xe9\x9a\x94\xe6\xa0\xbc\xe5\xbc\x8f\n",
+    /* S_ERR_UNKNOWN */ "\xe6\x9c\xaa\xe7\x9f\xa5\xe5\x8f\x82\xe6\x95\xb0\n",
+    /* S_ERR_NO_INPUT*/ "\xe9\x94\x99\xe8\xaf\xaf: \xe8\xaf\xb7\xe4\xbd\xbf\xe7\x94\xa8 -i \xe6\x8c\x87\xe5\xae\x9a\xe8\xbe\x93\xe5\x85\xa5\xe8\xa7\x86\xe9\xa2\x91\xe6\x96\x87\xe4\xbb\xb6\n",
+    /* S_OUT_DIR     */ "\xe8\xbe\x93\xe5\x87\xba\xe7\x9b\xae\xe5\xbd\x95: %s\n",
+    /* S_ERR_MKDIR   */ "\xe9\x94\x99\xe8\xaf\xaf: \xe6\x97\xa0\xe6\xb3\x95\xe5\x88\x9b\xe5\xbb\xba\xe7\x9b\xae\xe5\xbd\x95 '%s'\n",
+    /* S_ERR_OPEN_VID*/ "\xe9\x94\x99\xe8\xaf\xaf: \xe6\x97\xa0\xe6\xb3\x95\xe6\x89\x93\xe5\xbc\x80\xe8\xa7\x86\xe9\xa2\x91 '%s'\n",
+    /* S_ERR_STREAM  */ "\xe9\x94\x99\xe8\xaf\xaf: \xe6\x97\xa0\xe6\xb3\x95\xe8\x8e\xb7\xe5\x8f\x96\xe6\xb5\x81\xe4\xbf\xa1\xe6\x81\xaf\n",
+    /* S_ERR_NO_VIDEO*/ "\xe9\x94\x99\xe8\xaf\xaf: \xe6\x9c\xaa\xe6\x89\xbe\xe5\x88\xb0\xe8\xa7\x86\xe9\xa2\x91\xe6\xb5\x81\n",
+    /* S_ERR_CODEC   */ "\xe9\x94\x99\xe8\xaf\xaf: \xe4\xb8\x8d\xe6\x94\xaf\xe6\x8c\x81\xe7\x9a\x84\xe7\xbc\x96\xe8\xa7\xa3\xe7\xa0\x81\xe5\x99\xa8\n",
+    /* S_ERR_DECODER */ "\xe9\x94\x99\xe8\xaf\xaf: \xe6\x97\xa0\xe6\xb3\x95\xe6\x89\x93\xe5\xbc\x80\xe8\xa7\xa3\xe7\xa0\x81\xe5\x99\xa8\n",
+    /* S_VIDEO_INFO  */ "\xe8\xa7\x86\xe9\xa2\x91: %dx%d, \xe9\x97\xb4\xe9\x9a\x94: %.2f \xe7\xa7\x92\n",
+    /* S_CAPTURING   */ "\xe5\xbc\x80\xe5\xa7\x8b\xe6\x88\xaa\xe5\x9b\xbe...\n",
+    /* S_DONE        */ "\n\xe5\xae\x8c\xe6\x88\x90! \xe5\x85\xb1\xe6\x88\xaa\xe5\x8f\x96 %d \xe5\xb8\xa7 -> %s\n",
+    /* S_ERR_INT_FMT */ "\xe9\x94\x99\xe8\xaf\xaf: \xe6\x97\xa0\xe6\x95\x88\xe7\x9a\x84\xe9\x97\xb4\xe9\x9a\x94\xe6\xa0\xbc\xe5\xbc\x8f '%s'\n",
+    /* S_EX1         */ "  Kohane -i \xe8\xa7\x86\xe9\xa2\x91.mp4\n",
+    /* S_EX2         */ "  Kohane -i \xe8\xa7\x86\xe9\xa2\x91.mp4 -s 1m\n",
+    /* S_EX3         */ "  Kohane -i \xe8\xa7\x86\xe9\xa2\x91.mp4 -s 500ms\n",
+    /* S_FRAME_FMT   */ "  [%04d] %s  (%.2f \xe7\xa7\x92)\n",
+};
+
+#define T(i) (g_lang ? S_zh[i] : S_en[i])
+
+static void detect_language(void)
+{
+#ifdef _WIN32
+    LANGID lid = GetUserDefaultUILanguage();
+    if ((lid & 0xFF) == 0x04) g_lang = 1; /* Chinese */
+#else
+    const char *lang = getenv("LANG");
+    if (!lang) lang = getenv("LC_ALL");
+    if (lang && strstr(lang, "zh")) g_lang = 1;
+#endif
+}
+
+/* ──────────────────── FFmpeg log callback ──────────────────── */
+
+/* Suppress noisy FFmpeg decode errors after seek */
 static void ffmpeg_log_cb(void *ptr, int level, const char *fmt, va_list vl)
 {
-    /* 只输出 ERROR 级别, 且过滤已知的无害解码噪声 */
     if (level > AV_LOG_ERROR) return;
     static const char *const filters[] = {
         "NAL", "missing picture", "co located", "POC",
@@ -38,10 +124,10 @@ static void ffmpeg_log_cb(void *ptr, int level, const char *fmt, va_list vl)
     fprintf(stderr, "%s\n", msg);
 }
 
-/* ──────────────────── 编码转换 (Windows) ──────────────────── */
+/* ──────────────────── Encoding helpers (Windows) ──────────────────── */
 
 #ifdef _WIN32
-/* 系统代码页 -> UTF-8 (用于 FFmpeg 路径) */
+/* System codepage -> UTF-8 (for FFmpeg paths) */
 static char *sys_to_utf8(const char *src)
 {
     int wlen = MultiByteToWideChar(CP_ACP, 0, src, -1, NULL, 0);
@@ -54,7 +140,7 @@ static char *sys_to_utf8(const char *src)
     free(wstr);
     return utf8;
 }
-/* UTF-8 -> 系统代码页 (用于 mkdir/fopen) */
+/* UTF-8 -> System codepage (for mkdir/fopen) */
 static void utf8_to_sys(const char *utf8, char *out, int out_sz)
 {
     int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
@@ -64,7 +150,7 @@ static void utf8_to_sys(const char *utf8, char *out, int out_sz)
     WideCharToMultiByte(CP_ACP, 0, wstr, -1, out, out_sz, NULL, NULL);
     free(wstr);
 }
-/* wchar_t* -> UTF-8 (用于 wmain 参数转换) */
+/* wchar_t* -> UTF-8 (for wmain argument conversion) */
 static char *wchar_to_utf8(const wchar_t *src)
 {
     int ulen = WideCharToMultiByte(CP_UTF8, 0, src, -1, NULL, 0, NULL, NULL);
@@ -73,7 +159,7 @@ static char *wchar_to_utf8(const wchar_t *src)
     WideCharToMultiByte(CP_UTF8, 0, src, -1, utf8, ulen, NULL, NULL);
     return utf8;
 }
-/* UTF-8 路径 fopen (Windows fopen 不支持 UTF-8) */
+/* UTF-8 path fopen (Windows fopen does not support UTF-8) */
 static FILE *fopen_utf8(const char *path, const char *mode)
 {
     wchar_t wpath[1024], wmode[32];
@@ -83,13 +169,14 @@ static FILE *fopen_utf8(const char *path, const char *mode)
 }
 #endif
 
-/* ──────────────────── 时间解析 ──────────────────── */
+/* ──────────────────── Time parsing ──────────────────── */
 
 /*
- * 解析标准 Unix 时间字符串, 返回微秒值.
- * 支持格式: 30s / 2m / 1h / 1d / 500ms / 1000us
- *            或长写: sec / min / hour / day
- *            纯数字默认按秒计
+ * Parse time string, return microseconds.
+ * English: 30s / 2m / 1h / 1d / 500ms / 1000us / sec / min / hour / day
+ * Chinese: 30\xe7\xa7\x92 / 2\xe5\x88\x86 / 1\xe5\xb0\x8f\xe6\x97\xb6 / 1\xe5\xa4\xa9 /
+ *          500\xe6\xaf\xab\xe7\xa7\x92 / 1000\xe5\xbe\xae\xe7\xa7\x92
+ * Bare number defaults to seconds.
  */
 static int64_t parse_time(const char *str)
 {
@@ -99,17 +186,26 @@ static int64_t parse_time(const char *str)
     if (end == str) return -1;
     if (!end || *end == '\0') return (int64_t)(val * 1000000);
 
-    if      (!strcmp(end, "us"))              return (int64_t)val;
-    else if (!strcmp(end, "ms"))              return (int64_t)(val * 1000);
+    /* English units */
+    if      (!strcmp(end, "us"))                        return (int64_t)val;
+    else if (!strcmp(end, "ms"))                        return (int64_t)(val * 1000);
     else if (!strcmp(end, "s") || !strcmp(end, "sec"))  return (int64_t)(val * 1000000);
     else if (!strcmp(end, "m") || !strcmp(end, "min"))  return (int64_t)(val * 60000000LL);
     else if (!strcmp(end, "h") || !strcmp(end, "hour")) return (int64_t)(val * 3600000000LL);
     else if (!strcmp(end, "d") || !strcmp(end, "day"))  return (int64_t)(val * 86400000000LL);
 
+    /* Chinese units (UTF-8) */
+    if      (!strcmp(end, "\xe7\xa7\x92"))              return (int64_t)(val * 1000000);        /* \xe7\xa7\x92 = sec */
+    else if (!strcmp(end, "\xe5\x88\x86"))              return (int64_t)(val * 60000000LL);     /* \xe5\x88\x86 = min */
+    else if (!strcmp(end, "\xe5\xb0\x8f\xe6\x97\xb6"))  return (int64_t)(val * 3600000000LL);   /* \xe5\xb0\x8f\xe6\x97\xb6 = hour */
+    else if (!strcmp(end, "\xe5\xa4\xa9"))              return (int64_t)(val * 86400000000LL);  /* \xe5\xa4\xa9 = day */
+    else if (!strcmp(end, "\xe6\xaf\xab\xe7\xa7\x92"))  return (int64_t)(val * 1000);           /* \xe6\xaf\xab\xe7\xa7\x92 = ms */
+    else if (!strcmp(end, "\xe5\xbe\xae\xe7\xa7\x92"))  return (int64_t)val;                    /* \xe5\xbe\xae\xe7\xa7\x92 = us */
+
     return -1;
 }
 
-/* ──────────────────── PNG 写入 ──────────────────── */
+/* ──────────────────── PNG writer ──────────────────── */
 
 static int write_png(const char *path,
                      const uint8_t *rgb_data, int width, int height)
@@ -162,23 +258,23 @@ cleanup:
     return ret;
 }
 
-/* ──────────────────── 帮助信息 ──────────────────── */
+/* ──────────────────── Usage ──────────────────── */
 
 static void usage(void)
 {
-    printf("Kohane - 视频热截图工具 (帧提取器)\n\n");
-    printf("用法: Kohane -i <视频文件> [-s <间隔>]\n\n");
-    printf("选项:\n");
-    printf("  -i <文件>   输入视频文件路径\n");
-    printf("  -s <间隔>   截图间隔 (默认: 30s)\n");
-    printf("              支持: 30s, 2m, 1h, 500ms, 1d 等\n");
-    printf("\n示例:\n");
-    printf("  Kohane -i video.mp4\n");
-    printf("  Kohane -i video.mp4 -s 1m\n");
-    printf("  Kohane -i video.mp4 -s 500ms\n");
+    printf("%s", T(S_TITLE));
+    printf("%s", T(S_USAGE));
+    printf("%s", T(S_OPTIONS));
+    printf("%s", T(S_OPT_I));
+    printf("%s", T(S_OPT_S));
+    printf("%s", T(S_OPT_S2));
+    printf("%s", T(S_EXAMPLES));
+    printf("%s", T(S_EX1));
+    printf("%s", T(S_EX2));
+    printf("%s", T(S_EX3));
 }
 
-/* ──────────────────── 主函数 ──────────────────── */
+/* ──────────────────── Main ──────────────────── */
 
 #ifdef _WIN32
 int wmain(int argc, wchar_t *wargv[])
@@ -190,12 +286,14 @@ int main(int argc, char *argv[])
     SetConsoleOutputCP(65001);
 #endif
 
-    /* 抑制 FFmpeg 解码错误刷屏 */
+    detect_language();
+
+    /* Suppress noisy FFmpeg decode errors after seek */
     av_log_set_callback(ffmpeg_log_cb);
     av_log_set_level(AV_LOG_WARNING);
 
     const char    *input_file    = NULL;
-    int64_t        interval_us   = 30 * 1000000LL;   /* 默认 30 秒 */
+    int64_t        interval_us   = 30 * 1000000LL;   /* default 30 sec */
     char           output_dir[512];
     char           out_path[1024];
 
@@ -216,7 +314,7 @@ int main(int argc, char *argv[])
     char *input_utf8 = NULL;
 #endif
 
-    /* ── 解析命令行 ── */
+    /* ── Parse command line ── */
     for (i = 1; i < argc; i++) {
 #ifdef _WIN32
         wchar_t *arg = wargv[i];
@@ -228,7 +326,7 @@ int main(int argc, char *argv[])
             WideCharToMultiByte(CP_UTF8, 0, wargv[++i], -1, tmp, sizeof(tmp), NULL, NULL);
             interval_us = parse_time(tmp);
             if (interval_us <= 0) {
-                fprintf(stderr, "错误: 无效的间隔格式\n");
+                fprintf(stderr, "%s", T(S_ERR_INTERVAL));
                 return 1;
             }
         } else if (!wcscmp(arg, L"-h") || !wcscmp(arg, L"--help")) {
@@ -238,7 +336,7 @@ int main(int argc, char *argv[])
         } else if (!strcmp(argv[i], "-s") && i + 1 < argc) {
             interval_us = parse_time(argv[++i]);
             if (interval_us <= 0) {
-                fprintf(stderr, "错误: 无效的间隔格式 '%s'\n", argv[i]);
+                fprintf(stderr, T(S_ERR_INTERVAL_FMT), argv[i]);
                 return 1;
             }
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
@@ -246,33 +344,33 @@ int main(int argc, char *argv[])
             usage();
             return 0;
         } else {
-            fprintf(stderr, "未知参数\n");
+            fprintf(stderr, "%s", T(S_ERR_UNKNOWN));
             usage();
             return 1;
         }
     }
 
     if (!input_file) {
-        fprintf(stderr, "错误: 请使用 -i 指定输入视频文件\n");
+        fprintf(stderr, "%s", T(S_ERR_NO_INPUT));
         usage();
         return 1;
     }
 
-    /* ── 创建输出目录 ── */
+    /* ── Create output directory ── */
     {
 #ifdef _WIN32
-        /* 从 input_file (UTF-8) 提取 basename */
+        /* Extract basename from input_file (UTF-8) */
         const char *base = strrchr(input_file, '/');
         const char *bs   = strrchr(input_file, '\\');
         if (bs && bs > base) base = bs;
         base = base ? base + 1 : input_file;
 
-        /* 输出目录用系统代码页 (供 mkdir/fopen 使用) */
+        /* Output dir in system codepage (for mkdir) */
         char sys_dir[512];
         snprintf(output_dir, sizeof(output_dir), "%s_frames", base);
         utf8_to_sys(output_dir, sys_dir, sizeof(sys_dir));
         if (MKDIR(sys_dir) != 0 && errno != EEXIST) {
-            fprintf(stderr, "错误: 无法创建目录 '%s'\n", output_dir);
+            fprintf(stderr, T(S_ERR_MKDIR), output_dir);
             free(input_utf8);
             return 1;
         }
@@ -281,27 +379,27 @@ int main(int argc, char *argv[])
         base = base ? base + 1 : input_file;
         snprintf(output_dir, sizeof(output_dir), "%s_frames", base);
         if (MKDIR(output_dir) != 0 && errno != EEXIST) {
-            fprintf(stderr, "错误: 无法创建目录 '%s'\n", output_dir);
+            fprintf(stderr, T(S_ERR_MKDIR), output_dir);
             return 1;
         }
 #endif
-        printf("输出目录: %s\n", output_dir);
+        printf(T(S_OUT_DIR), output_dir);
     }
 
-    /* ── 打开视频 ── */
+    /* ── Open video ── */
     ret = avformat_open_input(&fmt_ctx, input_file, NULL, NULL);
     if (ret < 0) {
-        fprintf(stderr, "错误: 无法打开视频 '%s'\n", input_file);
+        fprintf(stderr, T(S_ERR_OPEN_VIDEO), input_file);
         return 1;
     }
 
     if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
-        fprintf(stderr, "错误: 无法获取流信息\n");
+        fprintf(stderr, "%s", T(S_ERR_STREAM_INFO));
         avformat_close_input(&fmt_ctx);
         return 1;
     }
 
-    /* ── 查找视频流 ── */
+    /* ── Find video stream ── */
     video_idx = -1;
     for (i = 0; i < (int)fmt_ctx->nb_streams; i++) {
         if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -310,15 +408,15 @@ int main(int argc, char *argv[])
         }
     }
     if (video_idx < 0) {
-        fprintf(stderr, "错误: 未找到视频流\n");
+        fprintf(stderr, "%s", T(S_ERR_NO_VIDEO));
         avformat_close_input(&fmt_ctx);
         return 1;
     }
 
-    /* ── 初始化解码器 ── */
+    /* ── Initialize decoder ── */
     codec = avcodec_find_decoder(fmt_ctx->streams[video_idx]->codecpar->codec_id);
     if (!codec) {
-        fprintf(stderr, "错误: 不支持的编解码器\n");
+        fprintf(stderr, "%s", T(S_ERR_CODEC));
         avformat_close_input(&fmt_ctx);
         return 1;
     }
@@ -326,13 +424,13 @@ int main(int argc, char *argv[])
     codec_ctx = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(codec_ctx, fmt_ctx->streams[video_idx]->codecpar);
     if (avcodec_open2(codec_ctx, codec, NULL) < 0) {
-        fprintf(stderr, "错误: 无法打开解码器\n");
+        fprintf(stderr, "%s", T(S_ERR_DECODER));
         avcodec_free_context(&codec_ctx);
         avformat_close_input(&fmt_ctx);
         return 1;
     }
 
-    /* ── 准备 RGB 转换 ── */
+    /* ── Prepare RGB conversion ── */
     frame     = av_frame_alloc();
     rgb_frame = av_frame_alloc();
     pkt       = av_packet_alloc();
@@ -351,27 +449,26 @@ int main(int argc, char *argv[])
         AV_PIX_FMT_RGB24, codec_ctx->width, codec_ctx->height, 1);
     rgb_buf = (uint8_t *)av_malloc((size_t)rgb_buf_size);
 
-    printf("视频: %dx%d, 间隔: %.2f 秒\n",
-           codec_ctx->width, codec_ctx->height,
+    printf(T(S_VIDEO_INFO), codec_ctx->width, codec_ctx->height,
            (double)interval_us / 1000000.0);
-    printf("开始截图...\n");
+    printf("%s", T(S_CAPTURING));
 
-    /* ── 按间隔截图 (智能 seek + 顺序解码混合) ── */
+    /* ── Capture frames (smart seek + sequential decode hybrid) ── */
     count        = 0;
     next_capture = 0;
     {
-        int     sequential = 0;      /* 1 = 顺序解码模式 */
-        int64_t decode_pos = 0;      /* 当前解码位置 (微秒, 估算) */
-        int64_t seek_threshold = interval_us * 3; /* seek vs 顺序的阈值 */
+        int     sequential = 0;      /* 1 = sequential decode mode */
+        int64_t decode_pos = 0;      /* current decode position (us, estimated) */
+        int64_t seek_threshold = interval_us * 3; /* seek vs sequential threshold */
 
         while (1) {
             int64_t duration = fmt_ctx->duration;
             if (duration > 0 && next_capture >= duration) break;
 
-            /* 决定 seek 还是顺序解码 */
+            /* Decide whether to seek or decode sequentially */
             int do_seek = 0;
             if (!sequential) {
-                /* 首次或目标在前方较远处 → seek */
+                /* First time or target is far ahead -> seek */
                 if (next_capture > decode_pos + seek_threshold)
                     do_seek = 1;
             }
@@ -381,15 +478,15 @@ int main(int argc, char *argv[])
                                     AVSEEK_FLAG_BACKWARD);
                 if (ret < 0) { sequential = 1; continue; }
 
-                /* drain 解码器残留帧, 然后 flush */
+                /* Drain decoder residual frames, then flush */
                 avcodec_send_packet(codec_ctx, NULL);
                 while (avcodec_receive_frame(codec_ctx, frame) == 0)
                     av_frame_unref(frame);
                 avcodec_flush_buffers(codec_ctx);
-                decode_pos = next_capture - interval_us; /* 估计 seek 落点 */
+                decode_pos = next_capture - interval_us; /* estimate seek landing point */
             }
 
-            /* 解码帧, 直到找到目标时间的帧 */
+            /* Decode frames until we reach the target timestamp */
             int found = 0;
             while (av_read_frame(fmt_ctx, pkt) >= 0) {
                 if (pkt->stream_index != video_idx) {
@@ -399,7 +496,7 @@ int main(int argc, char *argv[])
 
                 ret = avcodec_send_packet(codec_ctx, pkt);
                 av_packet_unref(pkt);
-                if (ret < 0) continue;  /* 损坏的包, 跳过 */
+                if (ret < 0) continue;  /* corrupted packet, skip */
 
                 while (avcodec_receive_frame(codec_ctx, frame) == 0) {
                     int64_t pts = frame->best_effort_timestamp;
@@ -411,7 +508,7 @@ int main(int argc, char *argv[])
                     decode_pos = cur_time;
 
                     if (cur_time < next_capture) {
-                        /* 落后目标超过阈值 → 切顺序模式 */
+                        /* Fell behind target by too much -> switch to sequential */
                         if (next_capture > 0 &&
                             cur_time < next_capture - seek_threshold) {
                             sequential = 1;
@@ -420,7 +517,7 @@ int main(int argc, char *argv[])
                         continue;
                     }
 
-                    /* 找到目标帧, 截图 */
+                    /* Target frame found, capture */
                     sws_scale(sws_ctx,
                               (const uint8_t * const *)frame->data,
                               frame->linesize, 0, codec_ctx->height,
@@ -434,7 +531,7 @@ int main(int argc, char *argv[])
                                   rgb_frame->data[0],
                                   codec_ctx->width,
                                   codec_ctx->height) == 0) {
-                        printf("  [%04d] %s  (%.2fs)\n",
+                        printf(T(S_FRAME_FMT),
                                count, out_path,
                                (double)cur_time / 1000000.0);
                         count++;
@@ -447,13 +544,13 @@ int main(int argc, char *argv[])
                 if (found) break;
             }
 
-            if (!found) break;  /* 读不到帧, 结束 */
+            if (!found) break;  /* no more frames, done */
         }
     }
 
-    printf("\n完成! 共截取 %d 帧 -> %s\n", count, output_dir);
+    printf(T(S_DONE), count, output_dir);
 
-    /* ── 清理 ── */
+    /* ── Cleanup ── */
     av_free(rgb_buf);
     sws_freeContext(sws_ctx);
     av_packet_free(&pkt);

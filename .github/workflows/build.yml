@@ -32,7 +32,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libavformat-dev libavcodec-dev \
-            libavutil-dev libswscale-dev libpng-dev
+            libavutil-dev libswscale-dev libpng-dev \
+            autoconf automake pkg-config
 
       # ── Windows: vcpkg ──
       - name: Install dependencies (Windows)
@@ -50,11 +51,15 @@ jobs:
         run: |
           brew install ffmpeg libpng
 
-      # ── Configure ──
-      - name: Configure CMake (Linux)
+      # ── Build (Linux: autotools) ──
+      - name: Build (Linux autotools)
         if: runner.os == 'Linux'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: |
+          autoreconf --install
+          ./configure
+          make
 
+      # ── Configure CMake (Windows / macOS) ──
       - name: Configure CMake (Windows)
         if: runner.os == 'Windows'
         shell: bash
@@ -68,8 +73,9 @@ jobs:
         if: runner.os == 'macOS'
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
-      # ── Build ──
-      - name: Build
+      # ── Build (Windows / macOS: CMake) ──
+      - name: Build (Windows / macOS)
+        if: runner.os != 'Linux'
         run: cmake --build build --config Release
 
       # ── Prepare artifact ──
@@ -79,6 +85,9 @@ jobs:
           mkdir -p dist
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp build/Release/Kohane.exe dist/Kohane-${{ matrix.label }}.exe
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            cp kohane dist/Kohane-${{ matrix.label }}
+            chmod +x dist/Kohane-${{ matrix.label }}
           else
             cp build/Kohane dist/Kohane-${{ matrix.label }}
             chmod +x dist/Kohane-${{ matrix.label }}
@@ -89,7 +98,7 @@ jobs:
           name: Kohane-${{ matrix.label }}
           path: dist/*
 
-  # ── Release (仅 tag 推送时) ──
+  # ── Release (only on tag push) ──
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
