@@ -10,11 +10,21 @@ if(MSVC)
     target_compile_options(Kohane PRIVATE /utf-8)
 endif()
 
-# Conan dependencies (via CMakeDeps generator)
-find_package(ffmpeg REQUIRED)
+# ── 依赖查找: 优先 Conan, 回退到 pkg-config (系统包/vcpkg) ──
+find_package(ffmpeg QUIET)
 find_package(PNG REQUIRED)
 
+if(ffmpeg_FOUND)
+    set(FFMPEG_LIBS ffmpeg::ffmpeg)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(FFMPEG REQUIRED
+        libavformat libavcodec libavutil libswscale)
+    target_include_directories(Kohane PRIVATE ${FFMPEG_INCLUDE_DIRS})
+    target_link_directories(Kohane PRIVATE ${FFMPEG_LIBRARY_DIRS})
+endif()
+
 target_link_libraries(Kohane PRIVATE
-    ffmpeg::ffmpeg
+    ${FFMPEG_LIBS}
     PNG::PNG
 )
